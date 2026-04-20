@@ -8,6 +8,7 @@ import Save from './Save';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useToast } from '@/components/ui/use-toast';
 import CCSFlowView from './flow/CCSFlowView';
+import CCSFlowWrapper from './flow/CCSFlowWrapper';
 
 const CCSEditor = ({ defaultCode }: { defaultCode: string | null }) => {
   const defaultSnippet = `// @anonymous\ndef module custom-module\ndef desc "Custom Scripted Module"\non module_enable {\n}\non module_disable {\n}`;
@@ -138,7 +139,7 @@ const CCSEditor = ({ defaultCode }: { defaultCode: string | null }) => {
 
         {/* Right: XYFlow graph */}
         <div className="flex-1 h-full">
-          <CCSFlowView code={liveCode} />
+          <CCSFlowWrapper code={code} />
         </div>
       </div>
     </div>
