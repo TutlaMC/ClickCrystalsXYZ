@@ -1,10 +1,30 @@
 import type { NodeDefinition, PortDef } from './types';
 
-const f = (id: string, label = id): PortDef => ({ id, label, dataType: 'flow' });
-const ev = (id: string, label = id): PortDef => ({ id, label, dataType: 'event' });
-const co = (id: string, label = id): PortDef => ({ id, label, dataType: 'condition' });
-const bd = (id: string, label = id): PortDef => ({ id, label, dataType: 'body' });
-const cb = (id: string, label = id): PortDef => ({ id, label, dataType: 'callback' });
+const f = (id: string, label = id): PortDef => ({
+  id,
+  label,
+  dataType: 'flow',
+});
+const ev = (id: string, label = id): PortDef => ({
+  id,
+  label,
+  dataType: 'event',
+});
+const co = (id: string, label = id): PortDef => ({
+  id,
+  label,
+  dataType: 'condition',
+});
+const bd = (id: string, label = id): PortDef => ({
+  id,
+  label,
+  dataType: 'body',
+});
+const cb = (id: string, label = id): PortDef => ({
+  id,
+  label,
+  dataType: 'callback',
+});
 
 export const NODE_REGISTRY: NodeDefinition[] = [
   {
@@ -267,9 +287,36 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     outputs: [],
     palette: true,
   },
-  { command: 'config_save',   label: 'config save',   description: 'Save config',   category: 'client', argHints: [], inputs: [f('in')], outputs: [], palette: true },
-  { command: 'config_load',   label: 'config load',   description: 'Load config',   category: 'client', argHints: [], inputs: [f('in')], outputs: [], palette: true },
-  { command: 'config_reload', label: 'config reload', description: 'Reload config', category: 'client', argHints: [], inputs: [f('in')], outputs: [], palette: true },
+  {
+    command: 'config_save',
+    label: 'config save',
+    description: 'Save config',
+    category: 'client',
+    argHints: [],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
+  {
+    command: 'config_load',
+    label: 'config load',
+    description: 'Load config',
+    category: 'client',
+    argHints: [],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
+  {
+    command: 'config_reload',
+    label: 'config reload',
+    description: 'Reload config',
+    category: 'client',
+    argHints: [],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
   {
     command: 'exit',
     label: 'exit',
@@ -310,7 +357,16 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     outputs: [],
     palette: true,
   },
-  { command: 'swap', label: 'swap', description: 'Swap main/offhand', category: 'macro', argHints: [], inputs: [f('in')], outputs: [], palette: true },
+  {
+    command: 'swap',
+    label: 'swap',
+    description: 'Swap main/offhand',
+    category: 'macro',
+    argHints: [],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
   {
     command: 'drop',
     label: 'drop',
@@ -371,10 +427,46 @@ export const NODE_REGISTRY: NodeDefinition[] = [
     outputs: [],
     palette: true,
   },
-  { command: 'gui_drop',      label: 'gui_drop',      description: 'Drop item in GUI',       category: 'macro', argHints: ['ID', 'N | all'],  inputs: [f('in')], outputs: [], palette: true },
-  { command: 'gui_switch',    label: 'gui_switch',    description: 'Hover item in GUI',       category: 'macro', argHints: ['ID'],              inputs: [f('in')], outputs: [], palette: true },
-  { command: 'gui_swap',      label: 'gui_swap',      description: 'Swap item in GUI',        category: 'macro', argHints: ['ID'],              inputs: [f('in')], outputs: [], palette: true },
-  { command: 'gui_quickmove', label: 'gui_quickmove', description: 'Quick-move item in GUI',  category: 'macro', argHints: ['ID', 'n (slot)?'], inputs: [f('in')], outputs: [], palette: true },
+  {
+    command: 'gui_drop',
+    label: 'gui_drop',
+    description: 'Drop item in GUI',
+    category: 'macro',
+    argHints: ['ID', 'N | all'],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
+  {
+    command: 'gui_switch',
+    label: 'gui_switch',
+    description: 'Hover item in GUI',
+    category: 'macro',
+    argHints: ['ID'],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
+  {
+    command: 'gui_swap',
+    label: 'gui_swap',
+    description: 'Swap item in GUI',
+    category: 'macro',
+    argHints: ['ID'],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
+  {
+    command: 'gui_quickmove',
+    label: 'gui_quickmove',
+    description: 'Quick-move item in GUI',
+    category: 'macro',
+    argHints: ['ID', 'n (slot)?'],
+    inputs: [f('in')],
+    outputs: [],
+    palette: true,
+  },
   {
     command: 'cancel_packet',
     label: 'cancel_packet',
@@ -397,17 +489,21 @@ export const NODE_REGISTRY: NodeDefinition[] = [
   },
 ];
 
-const _map = new Map<string, NodeDefinition>(NODE_REGISTRY.map(d => [d.command, d]));
+const _map = new Map<string, NodeDefinition>(
+  NODE_REGISTRY.map((d) => [d.command, d]),
+);
 
 export function getNodeDef(command: string): NodeDefinition {
-  return _map.get(command) ?? {
-    command,
-    label: command,
-    description: 'Unrecognized command',
-    category: 'unknown',
-    argHints: [],
-    inputs: [{ id: 'in', label: 'in', dataType: 'flow' }],
-    outputs: [],
-    palette: false,
-  };
+  return (
+    _map.get(command) ?? {
+      command,
+      label: command,
+      description: 'Unrecognized command',
+      category: 'unknown',
+      argHints: [],
+      inputs: [{ id: 'in', label: 'in', dataType: 'flow' }],
+      outputs: [],
+      palette: false,
+    }
+  );
 }
