@@ -1,391 +1,201 @@
 'use client';
-import { useReactFlow } from 'reactflow';
-import { addEdge, Connection } from 'reactflow';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import ReactFlow, {
   Background,
   Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
+  addEdge,
   Node,
   Edge,
+  Connection,
   BackgroundVariant,
-  MarkerType,
+  useReactFlow,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-import { CommandNode } from '@/lib/ccs-nodes/CommandNode';
-import { ModuleNode } from '@/lib/ccs-nodes/ModuleNode';
-import { getNodeDef, NODE_REGISTRY } from '@/lib/ccs-nodes/registry';
-import { CATEGORY_COLORS } from '@/lib/ccs-nodes/types';
+import { CommandNode, type CommandNodeData } from '@/lib/ccs-nodes/CommandNode';
+import { NodePalette } from '@/lib/ccs-nodes/NodePalette';
+import { getNodeDef } from '@/lib/ccs-nodes/registry';
+import { parseCCS, buildGraph, uid } from '@/lib/ccs-nodes/parser';
+import { generateCCS } from '@/lib/ccs-nodes/generator';
+import { CATEGORY_COLORS, HANDLE_TYPE_COLORS, type HandleDataType } from '@/lib/ccs-nodes/types';
 
+const nodeTypes = { command: CommandNode };
 
-const nodeTypes = {
-  module: ModuleNode,
-  command: CommandNode,
+const COMPATIBLE: Record<HandleDataType, HandleDataType[]> = {
+  flow:      ['flow'],
+  event:     ['event'],
+  condition: ['condition'],
+  body:      ['body', 'flow'],
+  callback:  ['callback', 'flow'],
 };
 
-interface ParsedStatement {
-  command: string;
-  args: string;
-  children: ParsedStatement[];
+function getPortDataType(nodeId: string, handleId: string | null | undefined, nodes: Node[]): HandleDataType | null {
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return null;
+  const data = node.data as CommandNodeData;
+  return [...data.inputs, ...data.outputs].find(p => p.id === handleId)?.dataType ?? null;
 }
 
-interface ParsedModule {
-  name: string;
-  desc: string;
-  author: string;
-  statements: ParsedStatement[];
+interface Props {
+  code: string;
+  onCodeChange?: (code: string) => void;
 }
 
-const MODULE_X_GAP = 500;
-const NODE_X_INDENT = 290;
-const NODE_Y_GAP = 115;
-const MODULE_Y = 60;
-
-let _id = 0;
-const uid = () => `n${_id++}`;
-
-// ─── Parser ───────────────────────────────────────────────────────────────────
- 
-interface ParsedStatement {
-  command: string;
-  args: string;
-  children: ParsedStatement[];
-}
- 
-interface ParsedModule {
-  name: string;
-  desc: string;
-  author: string;
-  statements: ParsedStatement[];
-}
- 
-function resolveCommand(token: string, restStr: string): string {
-  if (token === 'on') {
-    const evt = restStr.trim().split(/\s+/)[0];
-    return `on:${evt}`;
-  }
-  if (token === 'module') {
-    const sub = restStr.trim().split(/\s+/)[0];
-    if (['enable', 'disable', 'create'].includes(sub)) return `module ${sub}`;
-    return '__def_module';
-  }
-  if (token === 'config') {
-    const sub = restStr.trim().split(/\s+/)[0];
-    if (['save', 'load', 'reload'].includes(sub)) return `config ${sub}`;
-  }
-  if (token === 'def') {
-    const sub = restStr.trim().split(/\s+/)[0];
-    if (sub === 'module') return '__def_module';
-    if (sub === 'desc') return 'desc';
-    if (sub === 'func') return 'def func';
-    return '__def_module';
-  }
-  const aliases: Record<string, string> = {
-    func: 'function',
-    '!if': 'if_not',
-    '!while': 'while_not',
-    desc: 'desc',
-  };
-  return aliases[token] ?? token;
-}
- 
-function parseCCS(code: string): ParsedModule[] {
-  const modules: ParsedModule[] = [];
-  const lines = code.split('\n');
- 
-  let author = '@anonymous';
-  const authorLine = lines.find(l => l.trim().startsWith('//'));
-  if (authorLine) {
-    const m = authorLine.match(/\/\/\s*(@\S+)/);
-    if (m) author = m[1];
-  }
- 
-  let current: ParsedModule | null = null;
-  // stack[top] = the array we're currently appending statements into
-  let stack: ParsedStatement[][] = [];
- 
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith('//')) continue;
- 
-    const openings = (line.match(/\{/g) ?? []).length;
-    const closings = (line.match(/\}/g) ?? []).length;
- 
-    const stripped = line.replace(/[{}]/g, '').trim();
- 
-    // pure closing brace line
-    if (!stripped) {
-      for (let i = 0; i < closings && stack.length > 1; i++) stack.pop();
-      continue;
-    }
- 
-    const [token, ...rest] = stripped.split(/\s+/);
-    const restStr = rest.join(' ');
-    const cmd = resolveCommand(token, restStr);
- 
-    if (cmd === '__def_module') {
-      const modName = restStr.replace(/^module\s+/, '').trim();
-      if (current) modules.push(current);
-      current = { name: modName, desc: '', author, statements: [] };
-      stack = [current.statements];
-      continue;
-    }
- 
-    if (!current) continue;
- 
-    // desc at top level sets module description
-    if (cmd === 'desc' && stack.length <= 1) {
-      const m = stripped.match(/^(?:def\s+)?desc\s+"(.+)"/);
-      if (m) { current.desc = m[1]; continue; }
-    }
- 
-    const stmt: ParsedStatement = { command: cmd, args: restStr, children: [] };
-    const target = stack[stack.length - 1];
-    target.push(stmt);
- 
-    if (openings > closings) {
-      stack.push(stmt.children);
-    } else if (closings > openings) {
-      for (let i = 0; i < (closings - openings) && stack.length > 1; i++) {
-        stack.pop();
-      }
-    }
-  }
- 
-  if (current) modules.push(current);
-  return modules;
-}
- 
-// ─── Graph builder ────────────────────────────────────────────────────────────
- 
- 
-function statementsToGraph(
-  stmts: ParsedStatement[],
-  baseX: number,
-  startY: number,
-  parentId: string,
-  parentHandle: string,
-  nodes: Node[],
-  edges: Edge[],
-): number {
-  let y = startY;
-  for (const stmt of stmts) {
-    const def = getNodeDef(stmt.command);
-    const nodeId = uid();
-    const color = CATEGORY_COLORS[def.category];
- 
-    nodes.push({
-      id: nodeId,
-      type: 'command',
-      position: { x: baseX, y },
-      data: { ...def, args: stmt.args },
-    });
- 
-    edges.push({
-      id: `e-${parentId}-${nodeId}`,
-      source: parentId,
-      sourceHandle: parentHandle,
-      target: nodeId,
-      targetHandle: def.inputs[0]?.id,
-      style: { stroke: color, strokeWidth: 1.5, opacity: 0.5 },
-      markerEnd: { type: MarkerType.ArrowClosed, color, width: 10, height: 10 },
-    });
- 
-    y += NODE_Y_GAP;
- 
-    if (stmt.children.length) {
-      const childOutHandle = def.outputs[0]?.id ?? 'out';
-      y = statementsToGraph(
-        stmt.children,
-        baseX + NODE_X_INDENT,
-        y,
-        nodeId,
-        childOutHandle,
-        nodes,
-        edges,
-      );
-    }
-  }
-  return y;
-}
- 
-function buildGraph(modules: ParsedModule[]): { nodes: Node[]; edges: Edge[] } {
-  _id = 0;
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
- 
-  modules.forEach((mod, mi) => {
-    const moduleId = uid();
-    nodes.push({
-      id: moduleId,
-      type: 'module',
-      position: { x: mi * MODULE_X_GAP, y: MODULE_Y },
-      data: { name: mod.name, desc: mod.desc, author: mod.author },
-    });
- 
-    statementsToGraph(
-      mod.statements,
-      mi * MODULE_X_GAP + NODE_X_INDENT,
-      MODULE_Y,
-      moduleId,
-      'events',
-      nodes,
-      edges,
-    );
-  });
- 
-  return { nodes, edges };
-}
-
-function CCSFlowView({ code }: { code: string }) {
+function CCSFlowViewInner({ code, onCodeChange }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [availableNodes] = useState(NODE_REGISTRY); // Use NODE_REGISTRY for available nodes
+  const { project, getNodes, getEdges } = useReactFlow();
+
+  const fromCode = useRef(false);
+  const lastEmitted = useRef('');
+
+  const injectOnChange = useCallback((rawNodes: Node[]): Node[] => {
+    return rawNodes.map(n => ({
+      ...n,
+      data: {
+        ...n.data,
+        _onChange: (patch: Partial<CommandNodeData>) => {
+          setNodes(prev => {
+            const next = prev.map(p => p.id === n.id ? { ...p, data: { ...p.data, ...patch } } : p);
+            const newCode = generateCCS(next, getEdges());
+            if (newCode !== lastEmitted.current) {
+              lastEmitted.current = newCode;
+              onCodeChange?.(newCode);
+            }
+            return next;
+          });
+        },
+      },
+    }));
+  }, [setNodes, getEdges, onCodeChange]);
 
   useEffect(() => {
+    if (code === lastEmitted.current) return;
+    fromCode.current = true;
     const mods = parseCCS(code);
     const { nodes: n, edges: e } = buildGraph(mods);
-    setNodes(n);
+    setNodes(injectOnChange(n));
     setEdges(e);
+    setTimeout(() => { fromCode.current = false; }, 0);
   }, [code]);
 
-  // Handle adding a new node from the sidebar
-  const onNodeDragStart = (event: React.DragEvent, node: any) => {
-    event.dataTransfer.setData(
-      "application/reactflow",
-      JSON.stringify(node)
-    );
-    event.dataTransfer.effectAllowed = "move";
-  };
-  const { project } = useReactFlow();
-  const onDrop = (event: React.DragEvent) => {
-    event.preventDefault();
+  const emitCode = useCallback(() => {
+    if (fromCode.current) return;
+    const newCode = generateCCS(getNodes(), getEdges());
+    if (newCode !== lastEmitted.current) {
+      lastEmitted.current = newCode;
+      onCodeChange?.(newCode);
+    }
+  }, [getNodes, getEdges, onCodeChange]);
 
-    const reactFlowBounds = event.currentTarget.getBoundingClientRect();
+  const isValidConnection = useCallback((conn: Connection): boolean => {
+    if (conn.source === conn.target) return false;
+    const srcType = getPortDataType(conn.source!, conn.sourceHandle, getNodes());
+    const tgtType = getPortDataType(conn.target!, conn.targetHandle, getNodes());
+    if (!srcType || !tgtType) return true;
+    return COMPATIBLE[srcType]?.includes(tgtType) ?? false;
+  }, [getNodes]);
 
-    const nodeData = JSON.parse(
-      event.dataTransfer.getData("application/reactflow")
-    );
+  const onConnect = useCallback((conn: Connection) => {
+    if (!isValidConnection(conn)) return;
+    const srcType = getPortDataType(conn.source!, conn.sourceHandle, getNodes());
+    const color = srcType ? HANDLE_TYPE_COLORS[srcType] : '#aaaacc';
+    setEdges(eds => addEdge({ ...conn, type: 'smoothstep', style: { stroke: color, strokeWidth: 1.5, opacity: 0.6 } }, eds));
+    setTimeout(emitCode, 0);
+  }, [isValidConnection, getNodes, setEdges, emitCode]);
 
-    const position = project({
-      x: event.clientX - reactFlowBounds.left,
-      y: event.clientY - reactFlowBounds.top,
-    });
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
 
-    const newNode: Node = {
-      id: uid(),
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('application/ccs-node');
+    if (!raw) return;
+    const def = JSON.parse(raw);
+    const bounds = e.currentTarget.getBoundingClientRect();
+    const position = project({ x: e.clientX - bounds.left, y: e.clientY - bounds.top });
+    const nodeId = uid();
+    const newNode: Node<CommandNodeData> = {
+      id: nodeId,
       type: 'command',
       position,
-      data: nodeData,
-    };
-
-    setNodes((nds) => nds.concat(newNode));
-  };
-
-  const onDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  };
-
-  const onConnect = (connection: Connection) => {
-    setEdges((eds) =>
-      addEdge(
-        {
-          ...connection,
-          type: 'smoothstep',
-          markerEnd: { type: MarkerType.ArrowClosed },
+      data: {
+        ...def,
+        _onChange: (patch: Partial<CommandNodeData>) => {
+          setNodes(prev => {
+            const next = prev.map(p => p.id === nodeId ? { ...p, data: { ...p.data, ...patch } } : p);
+            const newCode = generateCCS(next, getEdges());
+            if (newCode !== lastEmitted.current) {
+              lastEmitted.current = newCode;
+              onCodeChange?.(newCode);
+            }
+            return next;
+          });
         },
-        eds
-      )
-    );
-  };
+      },
+    };
+    setNodes(prev => [...prev, newNode]);
+    setTimeout(emitCode, 50);
+  }, [project, setNodes, getEdges, onCodeChange, emitCode]);
+
+  const wrappedNodesChange: typeof onNodesChange = useCallback(changes => {
+    onNodesChange(changes);
+    if (changes.some(c => c.type === 'remove')) setTimeout(emitCode, 0);
+  }, [onNodesChange, emitCode]);
+
+  const wrappedEdgesChange: typeof onEdgesChange = useCallback(changes => {
+    onEdgesChange(changes);
+    if (changes.some(c => c.type === 'remove')) setTimeout(emitCode, 0);
+  }, [onEdgesChange, emitCode]);
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      <div
-        style={{ width: '200px', background: '#1f1f1f', padding: '10px', color: '#fff' }}
-      >
-        <h2>Available Nodes</h2>
-        <div>
-          {availableNodes.map((node) => (
-            <div
-              key={node.command}
-              draggable
-              onDragStart={(e) => onNodeDragStart(e, node)}
-              style={{
-                padding: '8px',
-                margin: '4px',
-                background: '#333',
-                cursor: 'grab',
-                borderRadius: '4px',
-              }}
-            >
-              {node.label}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div
-        style={{ flex: 1 }}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-      >
-        {nodes.length === 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: '#333',
-              fontFamily: 'monospace',
-              fontSize: 13,
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <span style={{ fontSize: 28 }}>◈</span>
-            <span>No modules found</span>
-            <span style={{ fontSize: 11, color: '#222' }}>
-              Start with `def module my-module`
-            </span>
+    <div style={{ display: 'flex', height: '100%', background: '#0a0a14' }}>
+      <NodePalette />
+      <div style={{ flex: 1, position: 'relative' }} onDrop={onDrop} onDragOver={onDragOver}>
+        {nodes.length === 0 && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#2a2a3a', fontFamily: 'monospace', gap: 8,
+            pointerEvents: 'none',
+          }}>
+            <span style={{ fontSize: 32 }}>◈</span>
+            <span style={{ fontSize: 13 }}>No modules found</span>
+            <span style={{ fontSize: 10 }}>Write `def module my-module` or drag a Module node</span>
           </div>
-        ) : (
-          <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.25 }}
-              attributionPosition="bottom-left"
-            >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1a1a2a" />
-            <Controls
-              style={{
-                background: '#1a1a2e',
-                border: '1px solid #ac892944',
-                borderRadius: 6,
-              }}
-            />
-            <MiniMap
-              style={{ background: '#0f0f1a', border: '1px solid #333' }}
-              nodeColor={(n) => {
-                const cat = (n.data as any)?.category;
-                return CATEGORY_COLORS[cat] ?? '#555';
-              }}
-            />
-          </ReactFlow>
         )}
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={wrappedNodesChange}
+          onEdgesChange={wrappedEdgesChange}
+          onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.25 }}
+          deleteKeyCode="Delete"
+          attributionPosition="bottom-left"
+        >
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#141424" />
+          <Controls style={{ background: '#111120', border: '1px solid #ac892930', borderRadius: 6 }} />
+          <MiniMap
+            style={{ background: '#0a0a14', border: '1px solid #1e1e2e' }}
+            nodeColor={n => CATEGORY_COLORS[(n.data as CommandNodeData)?.category] ?? '#333'}
+          />
+        </ReactFlow>
       </div>
     </div>
   );
 }
 
-export default CCSFlowView;
+export default function CCSFlowView(props: Props) {
+  return <CCSFlowViewInner {...props} />;
+}
