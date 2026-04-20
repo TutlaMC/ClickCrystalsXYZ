@@ -1,5 +1,4 @@
 'use client';
-
 import { Compressor } from '@/lib/compressor';
 import Editor from 'react-monaco-editor';
 import { languageDef, configuration, theme } from '@/lib/editor-config';
@@ -8,45 +7,32 @@ import Publish from './Publish';
 import Save from './Save';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useToast } from '@/components/ui/use-toast';
+import CCSFlowView from './flow/CCSFlowView';
 
 const CCSEditor = ({ defaultCode }: { defaultCode: string | null }) => {
-  const defaultSnippet = `// @anonymous\ndef module custom-module
-def desc "Custom Scripted Module"
-
-on module_enable {
-
-}
-
-on module_disable {
-
-}`;
+  const defaultSnippet = `// @anonymous\ndef module custom-module\ndef desc "Custom Scripted Module"\non module_enable {\n}\non module_disable {\n}`;
 
   const compressor = new Compressor();
   const [code, setCode] = useState(
     defaultCode === null ? defaultSnippet : defaultCode,
   );
-  const [result, setResult] = useState('');
+  // liveCode mirrors the editor in real-time for the flow view
+  const [liveCode, setLiveCode] = useState(code);
   const [editor, setEditor] = useState<any>();
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const deCompressCode = () => {
-    setResult(compressor.decompress(editor.getValue()));
-  };
-
-  const compressCode = () => {
-    setResult(compressor.compress(editor.getValue()));
-  };
-
   const updateCodeState = () => {
-    setCode((v: string) => editor.getValue());
-    return editor.getValue();
+    const val = editor.getValue();
+    setCode(val);
+    setLiveCode(val);
+    return val;
   };
+
   useEffect(() => {
     return () => {
       const error = searchParams.get('error');
-
       if (error === 'exception') {
         toast({
           title: 'Failed to load snippet',
@@ -68,19 +54,7 @@ on module_disable {
   }, [searchParams, router, toast]);
 
   const [dark, setDark] = useState(true);
-  // useEffect(() => {
-  //   const darkThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  //   if (darkThemeQuery.matches) {
-  //     setDark(true);
-  //   }
-  //   darkThemeQuery.addEventListener("change", (e) => {
-  //     if (e.matches) {
-  //       setDark(true);
-  //     } else {
-  //       setDark(false);
-  //     }
-  //   });
-  // }, []);
+  const [loading, setLoading] = useState(true);
 
   const editorWillMount = (monaco: any) => {
     if (!monaco.languages.getLanguages().some(({ id }: any) => id === 'ccs')) {
@@ -94,31 +68,38 @@ on module_disable {
   const editorDidMount = (editor: any) => {
     editor.focus();
     setEditor(editor);
-  };
-
-  const [loading, setLoading] = useState(true);
-
-  const editorsDidMount = (editor: any) => {
     setLoading(false);
+
+    // update flow view on every keystroke
+    editor.onDidChangeModelContent(() => {
+      setLiveCode(editor.getValue());
+    });
   };
 
   return (
     <div>
+      {/* Toolbar */}
       <div className="flex flex-row bg-white dark:bg-[#1e1e1e] gap-2 md:gap-4 pt-4 mx-8 justify-between">
         <div className="block md:flex md:flex-row md:gap-4 md:mx-4">
           <button
-            disabled={false}
-            onClick={deCompressCode}
+            onClick={() => {
+              const val = editor?.getValue() ?? '';
+              const compressor = new Compressor();
+              // reuse your existing decompress for "Format"
+              setLiveCode(compressor.decompress(val));
+            }}
             className="btn border-transparent focus:ring-[#ac8929] shadow-none bg-[#ac8929] hover:bg-[#725915] font-semibold px-6 py-2.5 text-white text-sm w-full mb-4 lg:w-auto"
           >
             Format
           </button>
           <button
-            disabled={false}
-            onClick={compressCode}
+            onClick={() => {
+              const val = editor?.getValue() ?? '';
+              setLiveCode(val);
+            }}
             className="btn border-transparent focus:ring-[#ac8929] shadow-none bg-[#ac8929] hover:bg-[#725915] font-semibold px-6 py-2.5 text-white text-sm w-full mb-4 lg:w-auto"
           >
-            Minify
+            Refresh Graph
           </button>
         </div>
         <div className="block md:flex md:flex-row md:gap-4 md:mx-4">
@@ -126,12 +107,15 @@ on module_disable {
           <Save receiveCode={updateCodeState} disabled={false} />
         </div>
       </div>
+
+      {/* Editor + Flow split */}
       <div
         className={`flex flex-col lg:flex-row h-screen bg-[#ffffff] text-black dark:bg-[#1e1e1e] dark:text-white ${loading && 'opacity-0'}`}
       >
+        {/* Left: Monaco editor */}
         <div className="flex-1 h-full">
           <Editor
-            language={'ccs'}
+            language="ccs"
             editorWillMount={editorWillMount}
             editorDidMount={editorDidMount}
             className="h-screen"
@@ -152,18 +136,9 @@ on module_disable {
           />
         </div>
 
+        {/* Right: XYFlow graph */}
         <div className="flex-1 h-full">
-          <Editor
-            language="ccs"
-            className="h-screen"
-            editorDidMount={editorsDidMount}
-            theme={dark ? 'ccs' : 'light'}
-            value={result}
-            options={{
-              readOnly: true,
-              wordWrap: 'on',
-            }}
-          />
+          <CCSFlowView code={liveCode} />
         </div>
       </div>
     </div>
